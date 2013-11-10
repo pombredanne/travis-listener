@@ -18,6 +18,10 @@ module Travis
       # see https://github.com/github/github-services/blob/master/services/travis.rb#L1-2
       set :events, %w[push pull_request]
 
+      before do
+        logger.level = 1
+      end
+
       get '/' do
         redirect "http://about.travis-ci.org"
       end
@@ -75,13 +79,17 @@ module Travis
 
       def handle_event
         return unless handle_event?
-        info "Handling #{event_type} event for #{slug}"
+        debug "Event payload for #{uuid}: #{payload.inspect}"
+        log_event(event_details, uuid: uuid, delivery_guid: delivery_guid, type: event_type, repository: slug)
         Travis::Sidekiq::BuildRequest.perform_async(data)
-        debug "Request created: #{payload.inspect}"
       end
 
       def handle_event?
         settings.events.include?(event_type)
+      end
+
+      def log_event(event_details, event_basics)
+        info(event_details.merge(event_basics).map{|k,v| "#{k}=#{v}"}.join(" "))
       end
 
       def data
@@ -89,12 +97,50 @@ module Travis
           :type => event_type,
           :credentials => credentials,
           :payload => payload,
-          :uuid => Travis.uuid
+          :uuid => uuid,
+          :github_guid => delivery_guid,
+          :github_event => event_type
         }
+      end
+
+      def uuid
+        @uuid ||= Travis.uuid
       end
 
       def event_type
         env['HTTP_X_GITHUB_EVENT'] || 'push'
+      end
+
+      def event_details
+        if event_type == 'pull_request'
+          {
+            number: decoded_payload['number'],
+            action: decoded_payload['action'],
+            source: decoded_payload['pull_request']['head']['repo'] && decoded_payload['pull_request']['head']['repo']['full_name'],
+            head:   decoded_payload['pull_request']['head']['sha'][0..6],
+            ref:    decoded_payload['pull_request']['head']['ref'],
+            user:   decoded_payload['pull_request']['user']['login'],
+          }
+        elsif event_type == 'push'
+          {
+            ref:     decoded_payload['ref'],
+            head:    push_head_commit,
+            commits: (decoded_payload["commits"] || []).map {|c| c['id'][0..6]}.join(",")
+          }
+        end
+      rescue => e
+        error("Error logging payload: #{e.message}")
+        error("Payload causing error: #{decoded_payload}")
+        Raven.capture_exception(e)
+        {}
+      end
+
+      def push_head_commit
+        decoded_payload['head_commit'] && decoded_payload['head_commit']['id'] && decoded_payload['head_commit']['id'][0..6]
+      end
+
+      def delivery_guid
+        env['HTTP_X_GITHUB_GUID']
       end
 
       def credentials

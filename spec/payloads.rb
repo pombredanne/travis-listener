@@ -8,6 +8,10 @@ GITHUB_PAYLOADS = {
         "name": "svenfuchs"
       }
     },
+    "head_commit": {
+      "id": "9854592",
+      "message": "Bump to 0.0.15"
+    },
     "commits": [{
       "id":        "9854592",
       "message":   "Bump to 0.0.15",
@@ -33,6 +37,8 @@ QUEUE_PAYLOAD = {
     :token => "12345"
   },
   :payload => GITHUB_PAYLOADS['gem-release'],
-  :uuid => Travis.uuid
+  :uuid => Travis.uuid,
+  :github_guid => 'abc123',
+  :github_event => 'push'
 }
 
